@@ -7,8 +7,7 @@ interface DeviceMotionEventConstructorWithPermission {
 }
 
 const GRAVITY_ALPHA = 0.9;
-const TROUGH_THRESHOLD = 0.5;
-const MIN_STEP_INTERVAL = 300;
+const PEAK_DETECT_THRESHOLD = 1.0; // फक्त "काहीतरी peak झालं" ओळखण्यासाठी, कमी ठेवलाय
 
 export function useStepCounter() {
   const [steps, setSteps] = useState(0);
@@ -16,21 +15,13 @@ export function useStepCounter() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'listening' | 'walking'>('idle');
 
-  // DEBUG values — UI मध्ये दाखवण्यासाठी
   const [liveMagnitude, setLiveMagnitude] = useState(0);
   const [peakSeen, setPeakSeen] = useState(0);
-
-  const peakThresholdRef = useRef(1.4); // slider ने बदलेल
-  const [peakThreshold, setPeakThresholdState] = useState(1.4);
+  const [recentGaps, setRecentGaps] = useState<number[]>([]); // ← नवीन: last 8 gaps (ms)
 
   const gravity = useRef({ x: 0, y: 0, z: 0 });
-  const lastStepTime = useRef(0);
-  const awaitingTrough = useRef(false);
-
-  const setPeakThreshold = useCallback((val: number) => {
-    peakThresholdRef.current = val;
-    setPeakThresholdState(val);
-  }, []);
+  const lastPeakTime = useRef(0);
+  const wasAbove = useRef(false);
 
   const handleMotion = useCallback((event: DeviceMotionEvent) => {
     const acc = event.accelerationIncludingGravity;
@@ -45,42 +36,35 @@ export function useStepCounter() {
     const linZ = acc.z - gravity.current.z;
 
     const mag = Math.sqrt(linX * linX + linY * linY + linZ * linZ);
-
     setLiveMagnitude(mag);
     setPeakSeen((prev) => Math.max(prev, mag));
 
     const now = Date.now();
-    const threshold = peakThresholdRef.current;
 
-    if (!awaitingTrough.current && mag > threshold) {
-      const gap = now - lastStepTime.current;
-      if (gap > MIN_STEP_INTERVAL) {
-        setSteps((prev) => prev + 1);
-        setStatus('walking');
-        lastStepTime.current = now;
+    // साधं peak detection — फक्त gap-pattern बघण्यासाठी, अजून कुठलं count/reject logic नाही
+    if (mag > PEAK_DETECT_THRESHOLD && !wasAbove.current) {
+      wasAbove.current = true;
+      if (lastPeakTime.current > 0) {
+        const gap = now - lastPeakTime.current;
+        setRecentGaps((prev) => [...prev.slice(-7), gap]); // शेवटचे 8 ठेवा
       }
-      awaitingTrough.current = true;
-    } else if (awaitingTrough.current && mag < TROUGH_THRESHOLD) {
-      awaitingTrough.current = false;
+      lastPeakTime.current = now;
+    } else if (mag < PEAK_DETECT_THRESHOLD * 0.6) {
+      wasAbove.current = false;
     }
   }, []);
 
   const start = useCallback(async () => {
     setError(null);
     if (typeof window === 'undefined' || !window.DeviceMotionEvent) {
-      setError('हे डिव्हाइस/ब्राउझर motion sensor support करत नाही.');
+      setError('Motion sensor supported नाही.');
       return;
     }
     const DME = DeviceMotionEvent as unknown as DeviceMotionEventConstructorWithPermission;
     if (typeof DME.requestPermission === 'function') {
-      try {
-        const result = await DME.requestPermission();
-        if (result !== 'granted') {
-          setError('Permission नाकारली गेली.');
-          return;
-        }
-      } catch (err) {
-        setError('Permission request failed: ' + (err as Error).message);
+      const result = await DME.requestPermission();
+      if (result !== 'granted') {
+        setError('Permission नाकारली.');
         return;
       }
     }
@@ -90,9 +74,7 @@ export function useStepCounter() {
   }, [handleMotion]);
 
   const stop = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('devicemotion', handleMotion);
-    }
+    window.removeEventListener('devicemotion', handleMotion);
     setIsTracking(false);
     setStatus('idle');
   }, [handleMotion]);
@@ -100,11 +82,11 @@ export function useStepCounter() {
   const reset = useCallback(() => {
     setSteps(0);
     setPeakSeen(0);
+    setRecentGaps([]);
   }, []);
 
   return {
     steps, isTracking, error, status, start, stop, reset,
-    liveMagnitude, peakSeen, setPeakSeen,
-    peakThreshold, setPeakThreshold,
+    liveMagnitude, peakSeen, setPeakSeen, recentGaps, setRecentGaps,
   };
 }
