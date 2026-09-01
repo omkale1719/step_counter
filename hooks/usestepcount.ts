@@ -9,6 +9,7 @@ interface DeviceMotionEventConstructorWithPermission {
 const GRAVITY_ALPHA = 0.9;
 const TROUGH_THRESHOLD = 0.5;
 const MIN_STEP_INTERVAL = 300;
+const PEAK_THRESHOLD = 2.5; // calibrated value
 
 export function useStepCounter() {
   const [steps, setSteps] = useState(0);
@@ -16,21 +17,9 @@ export function useStepCounter() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'listening' | 'walking'>('idle');
 
-  // DEBUG values — UI मध्ये दाखवण्यासाठी
-  const [liveMagnitude, setLiveMagnitude] = useState(0);
-  const [peakSeen, setPeakSeen] = useState(0);
-
-  const peakThresholdRef = useRef(1.4); // slider ने बदलेल
-  const [peakThreshold, setPeakThresholdState] = useState(1.4);
-
   const gravity = useRef({ x: 0, y: 0, z: 0 });
   const lastStepTime = useRef(0);
   const awaitingTrough = useRef(false);
-
-  const setPeakThreshold = useCallback((val: number) => {
-    peakThresholdRef.current = val;
-    setPeakThresholdState(val);
-  }, []);
 
   const handleMotion = useCallback((event: DeviceMotionEvent) => {
     const acc = event.accelerationIncludingGravity;
@@ -46,13 +35,9 @@ export function useStepCounter() {
 
     const mag = Math.sqrt(linX * linX + linY * linY + linZ * linZ);
 
-    setLiveMagnitude(mag);
-    setPeakSeen((prev) => Math.max(prev, mag));
-
     const now = Date.now();
-    const threshold = peakThresholdRef.current;
 
-    if (!awaitingTrough.current && mag > threshold) {
+    if (!awaitingTrough.current && mag > PEAK_THRESHOLD) {
       const gap = now - lastStepTime.current;
       if (gap > MIN_STEP_INTERVAL) {
         setSteps((prev) => prev + 1);
@@ -99,12 +84,7 @@ export function useStepCounter() {
 
   const reset = useCallback(() => {
     setSteps(0);
-    setPeakSeen(0);
   }, []);
 
-  return {
-    steps, isTracking, error, status, start, stop, reset,
-    liveMagnitude, peakSeen, setPeakSeen,
-    peakThreshold, setPeakThreshold,
-  };
+  return { steps, isTracking, error, status, start, stop, reset };
 }
