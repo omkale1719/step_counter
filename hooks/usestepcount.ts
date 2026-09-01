@@ -22,8 +22,8 @@ interface DeviceMotionEventConstructorWithPermission {
 const ALPHA = 0.9;
 const SMOOTH_FACTOR = 0.3;
 
-const PEAK_THRESHOLD = 1.4;      // यापेक्षा वर गेलं तरच peak candidate
-const REJECT_THRESHOLD = 10.0;   // यापेक्षा वर = shake/drop, ignore
+const PEAK_THRESHOLD = 1.8;      // यापेक्षा वर गेलं तरच peak candidate
+const REJECT_THRESHOLD = 12.0;   // यापेक्षा वर = shake/drop, ignore
 const TROUGH_THRESHOLD = 0.6;    // पुढचा peak मोजायच्या आधी इथे यायलाच हवं (hysteresis)
 
 const MIN_STEP_INTERVAL = 300;
