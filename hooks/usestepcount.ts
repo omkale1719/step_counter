@@ -7,11 +7,8 @@ interface DeviceMotionEventConstructorWithPermission {
 }
 
 const GRAVITY_ALPHA = 0.9;
-const PEAK_THRESHOLD = 2.5;       // amplitude gate — फक्त candidate ओळखायला
-const TROUGH_RATIO = 0.6;         // पुढचा peak मोजायच्या आधी इथे यायलाच हवं
-
-const STEP_GAP_MIN = 300;         // ms — यापेक्षा जवळचे gaps = same-step bounce
-const STEP_GAP_MAX = 800;         // ms — normal चालण्याचा cadence range
+const TROUGH_THRESHOLD = 0.5;
+const MIN_STEP_INTERVAL = 300;
 
 export function useStepCounter() {
   const [steps, setSteps] = useState(0);
@@ -19,60 +16,54 @@ export function useStepCounter() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'listening' | 'walking'>('idle');
 
+  // DEBUG values — UI मध्ये दाखवण्यासाठी
+  const [liveMagnitude, setLiveMagnitude] = useState(0);
+  const [peakSeen, setPeakSeen] = useState(0);
+
+  const peakThresholdRef = useRef(1.4); // slider ने बदलेल
+  const [peakThreshold, setPeakThresholdState] = useState(1.4);
+
   const gravity = useRef({ x: 0, y: 0, z: 0 });
-const lastPeakTime = useRef(0);
-const wasAbove = useRef(false);
-const previousGapInRange = useRef(false); // मागचा gap range मध्ये होता का
+  const lastStepTime = useRef(0);
+  const awaitingTrough = useRef(false);
 
-const handleMotion = useCallback((event: DeviceMotionEvent) => {
-  const acc = event.accelerationIncludingGravity;
-  if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
+  const setPeakThreshold = useCallback((val: number) => {
+    peakThresholdRef.current = val;
+    setPeakThresholdState(val);
+  }, []);
 
-  gravity.current.x = GRAVITY_ALPHA * gravity.current.x + (1 - GRAVITY_ALPHA) * acc.x;
-  gravity.current.y = GRAVITY_ALPHA * gravity.current.y + (1 - GRAVITY_ALPHA) * acc.y;
-  gravity.current.z = GRAVITY_ALPHA * gravity.current.z + (1 - GRAVITY_ALPHA) * acc.z;
+  const handleMotion = useCallback((event: DeviceMotionEvent) => {
+    const acc = event.accelerationIncludingGravity;
+    if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
 
-  const linX = acc.x - gravity.current.x;
-  const linY = acc.y - gravity.current.y;
-  const linZ = acc.z - gravity.current.z;
+    gravity.current.x = GRAVITY_ALPHA * gravity.current.x + (1 - GRAVITY_ALPHA) * acc.x;
+    gravity.current.y = GRAVITY_ALPHA * gravity.current.y + (1 - GRAVITY_ALPHA) * acc.y;
+    gravity.current.z = GRAVITY_ALPHA * gravity.current.z + (1 - GRAVITY_ALPHA) * acc.z;
 
-  const mag = Math.sqrt(linX * linX + linY * linY + linZ * linZ);
-  const now = Date.now();
+    const linX = acc.x - gravity.current.x;
+    const linY = acc.y - gravity.current.y;
+    const linZ = acc.z - gravity.current.z;
 
-  if (mag > PEAK_THRESHOLD && !wasAbove.current) {
-    wasAbove.current = true;
-    const gap = now - lastPeakTime.current;
+    const mag = Math.sqrt(linX * linX + linY * linY + linZ * linZ);
 
-    if (lastPeakTime.current === 0) {
-      lastPeakTime.current = now;
-      return;
-    }
+    setLiveMagnitude(mag);
+    setPeakSeen((prev) => Math.max(prev, mag));
 
-    if (gap < STEP_GAP_MIN) {
-      // खूप जवळचा gap = आधीच्याच पावलाचा bounce — पूर्णपणे ignore, वेळ अपडेट नाही
-      return;
-    }
+    const now = Date.now();
+    const threshold = peakThresholdRef.current;
 
-    if (gap <= STEP_GAP_MAX) {
-      // Valid walking-range gap
-      if (previousGapInRange.current) {
-        // मागचाही gap range मध्ये होता → खरी sequence चालू आहे → count करा
+    if (!awaitingTrough.current && mag > threshold) {
+      const gap = now - lastStepTime.current;
+      if (gap > MIN_STEP_INTERVAL) {
         setSteps((prev) => prev + 1);
         setStatus('walking');
+        lastStepTime.current = now;
       }
-      // मागचा गॅप range मध्ये नव्हता (sequence ची सुरुवात) → हा फक्त "confirm" म्हणून वापरा, count नाही
-      previousGapInRange.current = true;
-    } else {
-      // गॅप खूप मोठा (चालणं थांबलं/pause) → sequence तुटली, परत सुरुवातीपासून
-      previousGapInRange.current = false;
-      setStatus('listening');
+      awaitingTrough.current = true;
+    } else if (awaitingTrough.current && mag < TROUGH_THRESHOLD) {
+      awaitingTrough.current = false;
     }
-
-    lastPeakTime.current = now;
-  } else if (mag < PEAK_THRESHOLD * TROUGH_RATIO) {
-    wasAbove.current = false;
-  }
-}, []);
+  }, []);
 
   const start = useCallback(async () => {
     setError(null);
@@ -104,13 +95,16 @@ const handleMotion = useCallback((event: DeviceMotionEvent) => {
     }
     setIsTracking(false);
     setStatus('idle');
-   
   }, [handleMotion]);
 
   const reset = useCallback(() => {
     setSteps(0);
-    
+    setPeakSeen(0);
   }, []);
 
-  return { steps, isTracking, error, status, start, stop, reset };
+  return {
+    steps, isTracking, error, status, start, stop, reset,
+    liveMagnitude, peakSeen, setPeakSeen,
+    peakThreshold, setPeakThreshold,
+  };
 }
