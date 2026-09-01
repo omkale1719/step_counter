@@ -1,29 +1,33 @@
 'use client';
+import { useStepCounter } from "@/hooks/usestepcount";
 
-import { useWalkTracker } from "@/hooks/useWalkTracker";
+ // Next.js साठी गरजेचं, plain React मध्ये harmless
 
-// import { useWalkTracker } from './useWalkTracker';
+// import { useStepCounter } from './useStepCounter';
 
 export default function StepCounter() {
-  const { steps, distanceMeters, confidence, status, error, start, stop, reset } =
-    useWalkTracker();
+  const { steps, isTracking, error, status, start, stop, reset } = useStepCounter();
 
   return (
     <div style={{ textAlign: 'center', padding: '2rem' }}>
       <h2 style={{ fontSize: '3rem', margin: 0 }}>{steps}</h2>
       <p style={{ color: '#888' }}>steps · status: {status}</p>
-      <p style={{ color: '#888' }}>{distanceMeters.toFixed(1)} m (GPS)</p>
-      {confidence !== null && (
-        <p style={{ color: '#aaa' }}>
-          Accuracy confidence: {(confidence * 100).toFixed(0)}%
-        </p>
-      )}
+
       {error && <p style={{ color: 'red' }}>{error}</p>}
-      <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-        <button onClick={start}>Start</button>
-        <button onClick={stop}>Stop</button>
+
+      <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '1rem' }}>
+        {!isTracking ? (
+          <button onClick={start}>Start Tracking</button>
+        ) : (
+          <button onClick={stop}>Stop</button>
+        )}
         <button onClick={reset}>Reset</button>
       </div>
+
+      {!isTracking && (
+        <p style={{ fontSize: '0.85rem', color: '#aaa', marginTop: '1rem' }}>
+        </p>
+      )}
     </div>
   );
 }

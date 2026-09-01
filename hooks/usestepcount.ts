@@ -22,15 +22,16 @@ interface DeviceMotionEventConstructorWithPermission {
 const ALPHA = 0.9;
 const SMOOTH_FACTOR = 0.3;
 
-const PEAK_THRESHOLD = 1.4;      // यापेक्षा वर गेलं तरच peak candidate
-const REJECT_THRESHOLD = 10.0;   // यापेक्षा वर = shake/drop, ignore
-const TROUGH_THRESHOLD = 0.6;    // पुढचा peak मोजायच्या आधी इथे यायलाच हवं (hysteresis)
+const PEAK_THRESHOLD = 1.3;
+const TROUGH_THRESHOLD = 0.5;
+const REJECT_THRESHOLD = 12.0;
 
-const MIN_STEP_INTERVAL = 300;
-const MAX_STEP_INTERVAL = 2000;
+const MIN_STEP_INTERVAL = 250;
+const MAX_STEP_INTERVAL = 1000; // सामान्य चालण्याचा gap 300-800ms; यापेक्षा जास्त = sequence तुटली
 
-const ENERGY_WINDOW_MS = 1000;   // 1 सेकंदाचा rolling window
-const ENERGY_STD_MIN = 0.5;      // यापेक्षा कमी std-dev = "no real motion"
+const GAP_WINDOW = 4;           // periodicity check साठी किती मागचे gaps वापरायचे
+const CV_THRESHOLD = 0.35;      // coefficient of variation — यापेक्षा कमी असेल तरच "regular" धरा
+const CONFIRMED_STEPS_TO_START = 3; // इतके regular peaks आले की मगच "चालणं सुरू झालं" धरा
 
 export function useStepCounter(): UseStepCounterReturn {
   const [steps, setSteps] = useState<number>(0);
@@ -40,11 +41,18 @@ export function useStepCounter(): UseStepCounterReturn {
 
   const gravity = useRef({ x: 0, y: 0, z: 0 });
   const smoothedMag = useRef<number>(0);
-  const lastStepTime = useRef<number>(0);
-  const awaitingTrough = useRef<boolean>(false); // peak झाला, trough ची वाट बघतोय
+  const awaitingTrough = useRef<boolean>(false);
+  const lastPeakTime = useRef<number>(0);
 
-  // Motion-energy window साठी buffer: [{t, mag}]
-  const magHistory = useRef<{ t: number; mag: number }[]>([]);
+  const gapBuffer = useRef<number[]>([]);      // rolling gaps (candidate sequence)
+  const isWalkingConfirmed = useRef<boolean>(false);
+  const pendingSteps = useRef<number>(0);      // confirm होईपर्यंत तात्पुरते साठवलेले steps
+
+  const computeCV = (arr: number[]): number => {
+    const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+    const variance = arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
+    return Math.sqrt(variance) / mean;
+  };
 
   const handleMotion = useCallback((event: DeviceMotionEvent) => {
     const acc = event.accelerationIncludingGravity;
@@ -62,51 +70,61 @@ export function useStepCounter(): UseStepCounterReturn {
     smoothedMag.current =
       smoothedMag.current * (1 - SMOOTH_FACTOR) + rawMag * SMOOTH_FACTOR;
 
-    const now = Date.now();
     const mag = smoothedMag.current;
+    const now = Date.now();
 
-    // --- Motion-energy gate: rolling window मध्ये std-dev काढा ---
-    magHistory.current.push({ t: now, mag });
-    while (
-      magHistory.current.length > 0 &&
-      now - magHistory.current[0].t > ENERGY_WINDOW_MS
-    ) {
-      magHistory.current.shift();
-    }
-    const values = magHistory.current.map((h) => h.mag);
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    const variance =
-      values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
-    const stdDev = Math.sqrt(variance);
-
-    const hasRealMotion = stdDev > ENERGY_STD_MIN;
-
-    if (!hasRealMotion) {
-      // हातातला हलकासा shake — इथेच बहुतेक false positives थांबतात
-      setStatus((s) => (s === 'walking' ? 'listening' : s));
-      return;
-    }
-
-    // --- Reject extreme spikes (drop/hard shake) ---
     if (mag > REJECT_THRESHOLD) return;
 
     // --- Hysteresis peak detection ---
     if (!awaitingTrough.current && mag > PEAK_THRESHOLD) {
-      const gap = now - lastStepTime.current;
+      awaitingTrough.current = true;
 
-      if (gap > MIN_STEP_INTERVAL && gap < MAX_STEP_INTERVAL) {
-        setSteps((prev) => prev + 1);
-        setStatus('walking');
-        lastStepTime.current = now;
-      } else if (gap >= MAX_STEP_INTERVAL) {
-        // पहिलाच valid peak या sequence मधला — count करा, gap track सुरू करा
-        setSteps((prev) => prev + 1);
-        setStatus('walking');
-        lastStepTime.current = now;
+      const gap = now - lastPeakTime.current;
+      lastPeakTime.current = now;
+
+      if (gap < MIN_STEP_INTERVAL) return; // खूप जवळचे double-peaks ignore
+
+      if (gap > MAX_STEP_INTERVAL) {
+        // sequence तुटली — नव्याने सुरुवात
+        gapBuffer.current = [];
+        pendingSteps.current = 0;
+        isWalkingConfirmed.current = false;
+        setStatus('listening');
+        return;
       }
-      awaitingTrough.current = true; // पुढचा peak मोजायच्या आधी आधी trough लागेल
+
+      gapBuffer.current.push(gap);
+      if (gapBuffer.current.length > GAP_WINDOW) gapBuffer.current.shift();
+      pendingSteps.current += 1;
+
+      // --- Periodicity check ---
+      if (gapBuffer.current.length >= 3) {
+        const cv = computeCV(gapBuffer.current);
+
+        if (cv < CV_THRESHOLD) {
+          // Regular rhythm आहे — हे खरं चालणं आहे
+          if (!isWalkingConfirmed.current) {
+            if (pendingSteps.current >= CONFIRMED_STEPS_TO_START) {
+              // आत्ताच confirm झालं — आतापर्यंत साठवलेले सगळे pending steps एकदम add करा
+              setSteps((prev) => prev + pendingSteps.current);
+              isWalkingConfirmed.current = true;
+              setStatus('walking');
+            }
+            // अजून confirm झालं नाही — वाट बघा, पण pendingSteps वाढतच राहतील
+          } else {
+            // आधीच चालणं confirm आहे — प्रत्येक नवीन regular peak लगेच count करा
+            setSteps((prev) => prev + 1);
+          }
+        } else {
+          // अनियमित — हे random हलणं, चालणं तुटलं असं धरा
+          isWalkingConfirmed.current = false;
+          pendingSteps.current = 0;
+          gapBuffer.current = [gap]; // पूर्ण reset न करता नवीन gap पासून सुरू ठेवा
+          setStatus('listening');
+        }
+      }
     } else if (awaitingTrough.current && mag < TROUGH_THRESHOLD) {
-      awaitingTrough.current = false; // आता पुढचा peak valid candidate आहे
+      awaitingTrough.current = false;
     }
   }, []);
 
@@ -141,12 +159,13 @@ export function useStepCounter(): UseStepCounterReturn {
     }
     setIsTracking(false);
     setStatus('idle');
-    magHistory.current = [];
   }, [handleMotion]);
 
   const reset = useCallback((): void => {
     setSteps(0);
-    magHistory.current = [];
+    gapBuffer.current = [];
+    pendingSteps.current = 0;
+    isWalkingConfirmed.current = false;
   }, []);
 
   return { steps, isTracking, error, status, start, stop, reset };
