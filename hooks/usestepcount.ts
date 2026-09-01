@@ -39,16 +39,21 @@ export function useStepCounter() {
     setLiveMagnitude(mag);
     setPeakSeen((prev) => Math.max(prev, mag));
 
-    const now = Date.now();
+        const now = Date.now();
 
-    // साधं peak detection — फक्त gap-pattern बघण्यासाठी, अजून कुठलं count/reject logic नाही
+    // साधं peak detection — आता debounce सह (एका पावलाचे bounce वेगळे मोजले जाऊ नयेत)
     if (mag > PEAK_DETECT_THRESHOLD && !wasAbove.current) {
       wasAbove.current = true;
-      if (lastPeakTime.current > 0) {
-        const gap = now - lastPeakTime.current;
-        setRecentGaps((prev) => [...prev.slice(-7), gap]); // शेवटचे 8 ठेवा
+      const gap = now - lastPeakTime.current;
+
+      if (lastPeakTime.current === 0 || gap > 300) {
+        // 300ms च्या आत आलेला peak म्हणजे मागच्याच पावलाचा bounce — तो ignore करा
+        if (lastPeakTime.current > 0) {
+          setRecentGaps((prev) => [...prev.slice(-7), gap]);
+        }
+        lastPeakTime.current = now;
       }
-      lastPeakTime.current = now;
+      // gap <= 300 असेल तर lastPeakTime अपडेटच करू नका — तो bounce होता
     } else if (mag < PEAK_DETECT_THRESHOLD * 0.6) {
       wasAbove.current = false;
     }
