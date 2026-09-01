@@ -26,7 +26,6 @@ export default function StepCounter() {
 
       {!isTracking && (
         <p style={{ fontSize: '0.85rem', color: '#aaa', marginTop: '1rem' }}>
-          फक्त mobile browser वर काम करेल (HTTPS आवश्यक). iOS वर Start केल्यावर permission popup येईल.
         </p>
       )}
     </div>
