@@ -1,0 +1,139 @@
+'use client';
+
+import { useState, useRef, useCallback } from 'react';
+
+interface StepCounterState {
+  steps: number;
+  isTracking: boolean;
+  error: string | null;
+  status: 'idle' | 'listening' | 'walking';
+}
+
+interface UseStepCounterReturn extends StepCounterState {
+  start: () => Promise<void>;
+  stop: () => void;
+  reset: () => void;
+}
+
+interface DeviceMotionEventConstructorWithPermission {
+  requestPermission?: () => Promise<'granted' | 'denied'>;
+}
+
+export function useStepCounter(): UseStepCounterReturn {
+  const [steps, setSteps] = useState<number>(0);
+  const [isTracking, setIsTracking] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<StepCounterState['status']>('idle');
+
+  const gravity = useRef({ x: 0, y: 0, z: 0 });
+  const smoothedMag = useRef<number>(0);
+  const lastStepTime = useRef<number>(0);
+  const isAboveThreshold = useRef<boolean>(false);
+  const recentGaps = useRef<number[]>([]);       // last few step-to-step gaps
+  const consecutiveValidSteps = useRef<number>(0); // सलग किती consistent steps आले
+
+  const ALPHA = 0.8;
+
+  // दोन्ही bounds — फार कमी (shake नाही) आणि फार जास्त (drop/shake नाही)
+  const LOWER_THRESHOLD = 0.8;      // 1.0 वरून कमी केलं — halke steps पण पकडले जावेत
+const UPPER_THRESHOLD = 8.0;      // 6.0 वरून वाढवलं — जोरात चालणं reject होऊ नये
+const MIN_STEP_INTERVAL = 250;
+const MAX_STEP_INTERVAL = 1200;   // 900 वरून वाढवलं — हळू चालणंही धरलं जावं
+const WARMUP_STEPS = 1;           // 2 वरून 1 — periodicity check काढल्यामुळे strict warmup नको
+
+ const handleMotion = useCallback((event: DeviceMotionEvent) => {
+  const acc = event.accelerationIncludingGravity;
+  if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
+
+  gravity.current.x = ALPHA * gravity.current.x + (1 - ALPHA) * acc.x;
+  gravity.current.y = ALPHA * gravity.current.y + (1 - ALPHA) * acc.y;
+  gravity.current.z = ALPHA * gravity.current.z + (1 - ALPHA) * acc.z;
+
+  const linX = acc.x - gravity.current.x;
+  const linY = acc.y - gravity.current.y;
+  const linZ = acc.z - gravity.current.z;
+
+  const magnitude = Math.sqrt(linX * linX + linY * linY + linZ * linZ);
+  smoothedMag.current = smoothedMag.current * 0.7 + magnitude * 0.3;
+
+  const now = Date.now();
+  const mag = smoothedMag.current;
+
+  const inWalkingRange = mag > LOWER_THRESHOLD && mag < UPPER_THRESHOLD;
+
+  if (inWalkingRange && !isAboveThreshold.current) {
+    isAboveThreshold.current = true;
+    const gap = now - lastStepTime.current;
+
+    if (gap > MIN_STEP_INTERVAL && gap < MAX_STEP_INTERVAL) {
+      recentGaps.current.push(gap);
+      if (recentGaps.current.length > 5) recentGaps.current.shift();
+
+      // पहिल्या 1 step नंतर लगेच मोजायला सुरुवात करा — फक्त खूप मोठा jump असेल तरच थांबा
+      consecutiveValidSteps.current += 1;
+
+      if (consecutiveValidSteps.current >= WARMUP_STEPS) {
+        setSteps((prev) => prev + 1);
+        setStatus('walking');
+      }
+      lastStepTime.current = now;
+    } else if (gap >= MAX_STEP_INTERVAL) {
+      // चालणं थांबलं असेल तरच reset — मध्येच नाही
+      consecutiveValidSteps.current = 0;
+      recentGaps.current = [];
+      setStatus('listening');
+      lastStepTime.current = now;
+    }
+    // gap <= MIN_STEP_INTERVAL असेल (म्हणजे खूप पटकन परत peak) तर काहीच करू नका, lastStepTime अपडेट करू नका
+  } else if (mag < LOWER_THRESHOLD * 0.7) {
+    isAboveThreshold.current = false;
+  }
+}, []);
+
+  const start = useCallback(async (): Promise<void> => {
+    setError(null);
+
+    if (typeof window === 'undefined' || !window.DeviceMotionEvent) {
+      setError('हे डिव्हाइस/ब्राउझर motion sensor support करत नाही.');
+      return;
+    }
+
+    const DeviceMotionEventTyped = DeviceMotionEvent as unknown as DeviceMotionEventConstructorWithPermission;
+
+    if (typeof DeviceMotionEventTyped.requestPermission === 'function') {
+      try {
+        const result = await DeviceMotionEventTyped.requestPermission();
+        if (result !== 'granted') {
+          setError('Motion sensor permission नाकारली गेली.');
+          return;
+        }
+      } catch (err) {
+        setError('Permission request failed: ' + (err as Error).message);
+        return;
+      }
+    }
+    // Android वर इथे काहीच होत नाही — permission आधीच उपलब्ध असते, हे normal आहे
+
+    window.addEventListener('devicemotion', handleMotion);
+    setIsTracking(true);
+    setStatus('listening');
+  }, [handleMotion]);
+
+  const stop = useCallback((): void => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('devicemotion', handleMotion);
+    }
+    setIsTracking(false);
+    setStatus('idle');
+    consecutiveValidSteps.current = 0;
+    recentGaps.current = [];
+  }, [handleMotion]);
+
+  const reset = useCallback((): void => {
+    setSteps(0);
+    consecutiveValidSteps.current = 0;
+    recentGaps.current = [];
+  }, []);
+
+  return { steps, isTracking, error, status, start, stop, reset };
+}
