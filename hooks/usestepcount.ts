@@ -21,67 +21,59 @@ export function useStepCounter() {
   const [status, setStatus] = useState<'idle' | 'listening' | 'walking'>('idle');
 
   const gravity = useRef({ x: 0, y: 0, z: 0 });
-  const lastPeakTime = useRef(0);
-  const wasAbove = useRef(false);
+const lastPeakTime = useRef(0);
+const wasAbove = useRef(false);
+const previousGapInRange = useRef(false); // मागचा gap range मध्ये होता का
 
-  const candidateStreak = useRef(0);     // सलग किती valid-range gaps आले
-  const confirmed = useRef(false);       // WARMUP पार झालं का
-  const pendingStepCount = useRef(0);    // warmup दरम्यानचे steps (confirm झाल्यावर add करायला)
+const handleMotion = useCallback((event: DeviceMotionEvent) => {
+  const acc = event.accelerationIncludingGravity;
+  if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
 
-  const handleMotion = useCallback((event: DeviceMotionEvent) => {
-    const acc = event.accelerationIncludingGravity;
-    if (!acc || acc.x === null || acc.y === null || acc.z === null) return;
+  gravity.current.x = GRAVITY_ALPHA * gravity.current.x + (1 - GRAVITY_ALPHA) * acc.x;
+  gravity.current.y = GRAVITY_ALPHA * gravity.current.y + (1 - GRAVITY_ALPHA) * acc.y;
+  gravity.current.z = GRAVITY_ALPHA * gravity.current.z + (1 - GRAVITY_ALPHA) * acc.z;
 
-    gravity.current.x = GRAVITY_ALPHA * gravity.current.x + (1 - GRAVITY_ALPHA) * acc.x;
-    gravity.current.y = GRAVITY_ALPHA * gravity.current.y + (1 - GRAVITY_ALPHA) * acc.y;
-    gravity.current.z = GRAVITY_ALPHA * gravity.current.z + (1 - GRAVITY_ALPHA) * acc.z;
+  const linX = acc.x - gravity.current.x;
+  const linY = acc.y - gravity.current.y;
+  const linZ = acc.z - gravity.current.z;
 
-    const linX = acc.x - gravity.current.x;
-    const linY = acc.y - gravity.current.y;
-    const linZ = acc.z - gravity.current.z;
+  const mag = Math.sqrt(linX * linX + linY * linY + linZ * linZ);
+  const now = Date.now();
 
-    const mag = Math.sqrt(linX * linX + linY * linY + linZ * linZ);
-    const now = Date.now();
+  if (mag > PEAK_THRESHOLD && !wasAbove.current) {
+    wasAbove.current = true;
+    const gap = now - lastPeakTime.current;
 
-    if (mag > PEAK_THRESHOLD && !wasAbove.current) {
-      wasAbove.current = true;
-      const gap = now - lastPeakTime.current;
-
-      if (lastPeakTime.current === 0) {
-        lastPeakTime.current = now;
-        return;
-      }
-
-      const inWalkingRange = gap >= STEP_GAP_MIN && gap <= STEP_GAP_MAX;
-
-      if (inWalkingRange) {
-        candidateStreak.current += 1;
-        pendingStepCount.current += 1;
-
-        if (!confirmed.current && candidateStreak.current >= WARMUP_COUNT) {
-          // Warmup पार झालं — साठवलेले सगळे pending steps एकत्र add करा
-          confirmed.current = true;
-          setSteps((prev) => prev + pendingStepCount.current);
-          setStatus('walking');
-          pendingStepCount.current = 0;
-        } else if (confirmed.current) {
-          // आधीच confirmed आहे — प्रत्येक valid peak लगेच count करा
-          setSteps((prev) => prev + 1);
-          pendingStepCount.current = 0;
-        }
-      } else {
-        // Range बाहेरचा gap — नवीन sequence सुरू करा (पूर्ण reset नाही, फक्त streak)
-        candidateStreak.current = 0;
-        pendingStepCount.current = 0;
-        confirmed.current = false;
-        setStatus('listening');
-      }
-
+    if (lastPeakTime.current === 0) {
       lastPeakTime.current = now;
-    } else if (mag < PEAK_THRESHOLD * TROUGH_RATIO) {
-      wasAbove.current = false;
+      return;
     }
-  }, []);
+
+    if (gap < STEP_GAP_MIN) {
+      // खूप जवळचा gap = आधीच्याच पावलाचा bounce — पूर्णपणे ignore, वेळ अपडेट नाही
+      return;
+    }
+
+    if (gap <= STEP_GAP_MAX) {
+      // Valid walking-range gap
+      if (previousGapInRange.current) {
+        // मागचाही gap range मध्ये होता → खरी sequence चालू आहे → count करा
+        setSteps((prev) => prev + 1);
+        setStatus('walking');
+      }
+      // मागचा गॅप range मध्ये नव्हता (sequence ची सुरुवात) → हा फक्त "confirm" म्हणून वापरा, count नाही
+      previousGapInRange.current = true;
+    } else {
+      // गॅप खूप मोठा (चालणं थांबलं/pause) → sequence तुटली, परत सुरुवातीपासून
+      previousGapInRange.current = false;
+      setStatus('listening');
+    }
+
+    lastPeakTime.current = now;
+  } else if (mag < PEAK_THRESHOLD * TROUGH_RATIO) {
+    wasAbove.current = false;
+  }
+}, []);
 
   const start = useCallback(async () => {
     setError(null);
@@ -113,16 +105,12 @@ export function useStepCounter() {
     }
     setIsTracking(false);
     setStatus('idle');
-    candidateStreak.current = 0;
-    confirmed.current = false;
-    pendingStepCount.current = 0;
+   
   }, [handleMotion]);
 
   const reset = useCallback(() => {
     setSteps(0);
-    candidateStreak.current = 0;
-    confirmed.current = false;
-    pendingStepCount.current = 0;
+    
   }, []);
 
   return { steps, isTracking, error, status, start, stop, reset };
