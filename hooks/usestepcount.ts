@@ -7,12 +7,11 @@ interface DeviceMotionEventConstructorWithPermission {
 }
 
 const GRAVITY_ALPHA = 0.9;
-const PEAK_THRESHOLD = 1.2;       // amplitude gate — फक्त candidate ओळखायला
+const PEAK_THRESHOLD = 2.5;       // amplitude gate — फक्त candidate ओळखायला
 const TROUGH_RATIO = 0.6;         // पुढचा peak मोजायच्या आधी इथे यायलाच हवं
 
 const STEP_GAP_MIN = 300;         // ms — यापेक्षा जवळचे gaps = same-step bounce
 const STEP_GAP_MAX = 800;         // ms — normal चालण्याचा cadence range
-const WARMUP_COUNT = 3;           // इतके सलग consistent gaps आल्यावर "walking" confirm
 
 export function useStepCounter() {
   const [steps, setSteps] = useState(0);
