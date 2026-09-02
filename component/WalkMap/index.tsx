@@ -100,16 +100,16 @@ export default function WalkMap({ currentPosition, path }: WalkMapProps) {
         >
           {/* Current location — custom orange dot, theme-matching */}
           <Marker
-            position={currentPosition}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 8,
-              fillColor: '#E8A33D',
-              fillOpacity: 1,
-              strokeColor: '#16211C',
-              strokeWeight: 2,
-            }}
-          />
+  position={currentPosition}
+  icon={
+    'data:image/svg+xml;charset=UTF-8,' +
+    encodeURIComponent(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+        <circle cx="10" cy="10" r="8" fill="#E8A33D" stroke="#16211C" stroke-width="2"/>
+      </svg>
+    `)
+  }
+/>
 
           {/* Actual walking path */}
           {path.length > 1 && (
