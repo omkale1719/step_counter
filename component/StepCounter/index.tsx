@@ -1,6 +1,5 @@
 'use client';
 import { useStepCounter } from "@/hooks/usestepcount";
-import { useGeoDistance } from "@/hooks/useGeoDistance";
 
 const STATUS_COPY: Record<string, string> = {
   idle: 'ready to go',
@@ -10,7 +9,6 @@ const STATUS_COPY: Record<string, string> = {
 
 export default function StepCounter() {
   const { steps, isTracking, error, status, start, stop, reset } = useStepCounter();
-const geo = useGeoDistance(); // ← नवीन ओळ
 
   return (
     <div style={styles.page}>
@@ -73,42 +71,17 @@ const geo = useGeoDistance(); // ← नवीन ओळ
 
         <div style={styles.actions}>
           {!isTracking ? (
-  <button
-    className="primary-btn"
-    style={styles.primaryBtn}
-    onClick={() => { start(); geo.start(); }}  
-  >
-    Start tracking
-  </button>
-) : (
-  <button
-    className="primary-btn"
-    style={styles.primaryBtnActive}
-    onClick={() => { stop(); geo.stop(); }}  
-  >
-    Stop
-  </button>
-)}
-<button
-  className="secondary-btn"
-  style={styles.secondaryBtn}
-  onClick={() => { reset(); geo.reset(); }}  
->
-  Reset
-</button>
-
-
-
-<p style={styles.stepLabel}>steps</p>
-<p style={styles.distanceLabel}>
-  {(geo.distanceMeters / 1000).toFixed(2)} km
-  {geo.accuracy !== null && ` · ±${geo.accuracy.toFixed(0)}m accuracy`}
-</p>
-
-
-
-
-
+            <button className="primary-btn" style={styles.primaryBtn} onClick={start}>
+              Start tracking
+            </button>
+          ) : (
+            <button className="primary-btn" style={styles.primaryBtnActive} onClick={stop}>
+              Stop
+            </button>
+          )}
+          <button className="secondary-btn" style={styles.secondaryBtn} onClick={reset}>
+            Reset
+          </button>
         </div>
       </div>
     </div>
@@ -116,14 +89,6 @@ const geo = useGeoDistance(); // ← नवीन ओळ
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  
-distanceLabel: {
-  color: '#8FA396',
-  fontSize: '0.8rem',
-  marginTop: '-1.8rem',
-  marginBottom: '2rem',
-},
-
   page: {
     position: 'relative',
     minHeight: '100vh',
