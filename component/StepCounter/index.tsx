@@ -124,12 +124,12 @@ export default function StepCounter() {
             <span style={styles.statUnit}>km</span>
           </div>
           <div style={styles.statDivider} />
-          <div className="stat-block" style={styles.statBlock}>
+          {/* <div className="stat-block" style={styles.statBlock}>
             <span style={styles.statValue}>
               {geo.accuracy !== null ? `±${geo.accuracy.toFixed(0)}` : '—'}
             </span>
             <span style={styles.statUnit}>m accuracy</span>
-          </div>
+          </div> */}
         </div>
 
         {/* Buttons */}
