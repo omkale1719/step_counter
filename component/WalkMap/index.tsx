@@ -70,9 +70,9 @@ export default function WalkMap({ currentPosition, path }: WalkMapProps) {
   if (!apiKey) {
     return (
       <div style={styles.messageBox}>
-        Google Maps API key सेट नाही.
+        There Is An Issue of Google Maps API key
         <br />
-        `.env.local` check करा.
+        Please Check `.env.local`
       </div>
     );
   }
@@ -80,7 +80,7 @@ export default function WalkMap({ currentPosition, path }: WalkMapProps) {
   if (!currentPosition) {
     return (
       <div style={styles.messageBox}>
-        📍 Location मिळण्याची वाट बघतोय...
+        📍 Location is loading...
       </div>
     );
   }
