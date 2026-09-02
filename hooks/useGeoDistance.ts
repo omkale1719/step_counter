@@ -2,21 +2,27 @@
 
 import { useState, useRef, useCallback } from 'react';
 
+export interface LatLng {
+  lat: number;
+  lng: number;
+}
+
 interface UseGeoDistanceReturn {
   distanceMeters: number;
   isTracking: boolean;
   error: string | null;
   accuracy: number | null;
+  currentPosition: LatLng | null; // ← नवीन: सध्याचं location
+  path: LatLng[];                  // ← नवीन: आत्तापर्यंतचा संपूर्ण मार्ग
   start: () => void;
   stop: () => void;
   reset: () => void;
 }
 
-// Haversine formula — दोन lat/lon points मधलं जमिनीवरचं सरळ अंतर (meters)
 function haversineDistance(
   lat1: number, lon1: number, lat2: number, lon2: number
 ): number {
-  const R = 6371000; // पृथ्वीची त्रिज्या
+  const R = 6371000;
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
@@ -27,11 +33,7 @@ function haversineDistance(
   return R * c;
 }
 
-// GPS मध्ये स्थिर उभं असतानाही थोडा jitter (1-3m) दिसतो —
-// इतक्या लहान movements ला "प्रत्यक्ष चालणं" मानायचं नाही.
 const MIN_MOVEMENT_METERS = 1.5;
-
-// Accuracy बरोबर नसलेले (उदा. > 20m radius) points विश्वासार्ह नसतात, वगळा.
 const MAX_ACCEPTABLE_ACCURACY = 20;
 
 export function useGeoDistance(): UseGeoDistanceReturn {
@@ -39,6 +41,8 @@ export function useGeoDistance(): UseGeoDistanceReturn {
   const [isTracking, setIsTracking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [currentPosition, setCurrentPosition] = useState<LatLng | null>(null);
+  const [path, setPath] = useState<LatLng[]>([]);
 
   const lastPosition = useRef<{ lat: number; lon: number } | null>(null);
   const watchId = useRef<number | null>(null);
@@ -56,10 +60,11 @@ export function useGeoDistance(): UseGeoDistanceReturn {
         const { latitude, longitude, accuracy: acc } = pos.coords;
         setAccuracy(acc);
 
-        if (acc > MAX_ACCEPTABLE_ACCURACY) {
-          // हा reading खूप noisy आहे, distance मध्ये मोजू नका
-          return;
-        }
+        if (acc > MAX_ACCEPTABLE_ACCURACY) return;
+
+        // Map वर live marker साठी current position नेहमी अपडेट करा
+        // (distance calculation logic पेक्षा वेगळं — यासाठी jitter chalel)
+        setCurrentPosition({ lat: latitude, lng: longitude });
 
         if (lastPosition.current) {
           const d = haversineDistance(
@@ -70,20 +75,16 @@ export function useGeoDistance(): UseGeoDistanceReturn {
           );
           if (d >= MIN_MOVEMENT_METERS) {
             setDistanceMeters((prev) => prev + d);
+            setPath((prev) => [...prev, { lat: latitude, lng: longitude }]); // ← path मध्ये जोडा
             lastPosition.current = { lat: latitude, lon: longitude };
           }
-          // d खूप लहान असेल तर lastPosition अपडेट करू नका —
-          // छोटे jitter accumulate होऊन चुकीचं अंतर वाढू नये म्हणून.
         } else {
           lastPosition.current = { lat: latitude, lon: longitude };
+          setPath([{ lat: latitude, lng: longitude }]); // ← पहिला point
         }
       },
       (err) => setError('GPS error: ' + err.message),
-      {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 10000,
-      }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
 
     setIsTracking(true);
@@ -101,7 +102,12 @@ export function useGeoDistance(): UseGeoDistanceReturn {
     setDistanceMeters(0);
     lastPosition.current = null;
     setAccuracy(null);
+    setCurrentPosition(null);
+    setPath([]);
   }, []);
 
-  return { distanceMeters, isTracking, error, accuracy, start, stop, reset };
+  return {
+    distanceMeters, isTracking, error, accuracy,
+    currentPosition, path, start, stop, reset,
+  };
 }
